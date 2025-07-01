@@ -579,7 +579,11 @@ func (g *GoWSDL) toGoType(xsdType string, nillable bool) string {
 		t = t + "_" + ns
 	}
 
-	return "*" + replaceReservedWords(makePublic(t))
+	v := replaceReservedWords(makePublic(t))
+	if nillable {
+		return "*" + v
+	}
+	return v
 }
 
 func removePointerFromType(goType string) string {
