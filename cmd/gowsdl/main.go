@@ -54,6 +54,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	gen "github.com/hooklift/gowsdl"
 )
@@ -70,6 +71,7 @@ var outFile = flag.String("o", "myservice.go", "File where the generated code wi
 var dir = flag.String("d", "./", "Directory under which package directory will be created")
 var insecure = flag.Bool("i", false, "Skips TLS Verification")
 var makePublic = flag.Bool("make-public", true, "Make the generated types public/exported")
+var conflictingTypes = flag.String("c", "", "Comma separated list of conflicting types in the form 'type1,type2'. These will be resolved by suffixing the type name with the namespace")
 
 func init() {
 	log.SetFlags(0)
@@ -103,7 +105,7 @@ func main() {
 	}
 
 	// load wsdl
-	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, *insecure, *makePublic)
+	gowsdl, err := gen.NewGoWSDL(wsdlPath, *pkg, *insecure, *makePublic, strings.Split(*conflictingTypes, ","))
 	if err != nil {
 		log.Fatalln(err)
 	}

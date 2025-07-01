@@ -6,7 +6,7 @@ package gowsdl
 
 var typesTmpl = `
 {{define "SimpleType"}}
-	{{$typeName := replaceReservedWords .Name | makePublic}}
+	{{$typeName := toGoType .Name false | removePointerFromType}}
 	{{if .Doc}} {{.Doc | comment}} {{end}}
 	{{if ne .List.ItemType ""}}
 		type {{$typeName}} []{{toGoType .List.ItemType false | removePointerFromType}}
@@ -122,7 +122,7 @@ var typesTmpl = `
 
 	{{range .ComplexTypes}}
 		{{/* ComplexTypeGlobal */}}
-		{{$typeName := replaceReservedWords .Name | makePublic}}
+		{{$typeName := toGoType .Name false | removePointerFromType}}
 		{{if and (eq (len .SimpleContent.Extension.Attributes) 0) (eq (toGoType .SimpleContent.Extension.Base false) "string") }}
 			type {{$typeName}} string
 		{{else}}

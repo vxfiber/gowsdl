@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"text/template"
@@ -37,6 +38,8 @@ type GoWSDL struct {
 	resolvedXSDExternals  map[string]bool
 	currentRecursionLevel uint8
 	currentNamespace      string
+
+	conflictingTypes []string
 }
 
 // Method setNS sets (and returns) the currently active XML namespace.
@@ -94,7 +97,7 @@ func downloadFile(url string, ignoreTLS bool) ([]byte, error) {
 }
 
 // NewGoWSDL initializes WSDL generator.
-func NewGoWSDL(file, pkg string, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, error) {
+func NewGoWSDL(file, pkg string, ignoreTLS bool, exportAllTypes bool, conflictingTypes []string) (*GoWSDL, error) {
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return nil, errors.New("WSDL file is required to generate Go proxy")
@@ -115,10 +118,11 @@ func NewGoWSDL(file, pkg string, ignoreTLS bool, exportAllTypes bool) (*GoWSDL, 
 	}
 
 	return &GoWSDL{
-		loc:          r,
-		pkg:          pkg,
-		ignoreTLS:    ignoreTLS,
-		makePublicFn: makePublicFn,
+		loc:              r,
+		pkg:              pkg,
+		ignoreTLS:        ignoreTLS,
+		makePublicFn:     makePublicFn,
+		conflictingTypes: conflictingTypes,
 	}, nil
 }
 
@@ -288,7 +292,7 @@ func (g *GoWSDL) resolveXSDExternals(schema *XSDSchema, loc *Location) error {
 
 func (g *GoWSDL) genTypes() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":                 toGoType,
+		"toGoType":                 g.toGoType,
 		"stripns":                  stripns,
 		"replaceReservedWords":     replaceReservedWords,
 		"replaceAttrReservedWords": replaceAttrReservedWords,
@@ -318,7 +322,7 @@ func (g *GoWSDL) genTypes() ([]byte, error) {
 
 func (g *GoWSDL) genOperations() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"normalize":            normalize,
@@ -341,7 +345,7 @@ func (g *GoWSDL) genOperations() ([]byte, error) {
 
 func (g *GoWSDL) genServer() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"makePublic":           g.makePublicFn,
@@ -362,7 +366,7 @@ func (g *GoWSDL) genServer() ([]byte, error) {
 
 func (g *GoWSDL) genHeader() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"normalize":            normalize,
@@ -383,7 +387,7 @@ func (g *GoWSDL) genHeader() ([]byte, error) {
 
 func (g *GoWSDL) genServerHeader() ([]byte, error) {
 	funcMap := template.FuncMap{
-		"toGoType":             toGoType,
+		"toGoType":             g.toGoType,
 		"stripns":              stripns,
 		"replaceReservedWords": replaceReservedWords,
 		"makePublic":           g.makePublicFn,
@@ -542,23 +546,37 @@ func removeNS(xsdType string) string {
 	return r[0]
 }
 
-func toGoType(xsdType string, nillable bool) string {
+func (g *GoWSDL) toGoType(xsdType string, nillable bool) string {
+	if xsdType == "" {
+		return ""
+	}
+
 	// Handles name space, ie. xsd:string, xs:string
 	r := strings.Split(xsdType, ":")
 
-	t := r[0]
-
-	if len(r) == 2 {
+	var t, ns string
+	switch len(r) {
+	case 1:
+		t = r[0]
+	case 2:
+		ns = r[0]
 		t = r[1]
 	}
 
-	value := xsd2GoTypes[strings.ToLower(t)]
-
-	if value != "" {
+	if v := xsd2GoTypes[strings.ToLower(t)]; v != "" {
 		if nillable {
-			value = "*" + value
+			return "*" + v
 		}
-		return value
+		return v
+	}
+
+	if slices.Contains(g.conflictingTypes, t) {
+		if ns == "" {
+			parts := strings.Split(g.getNS(), "/")
+			ns = parts[len(parts)-1]
+		}
+
+		t = t + "_" + ns
 	}
 
 	return "*" + replaceReservedWords(makePublic(t))
