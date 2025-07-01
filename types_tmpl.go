@@ -95,7 +95,7 @@ var typesTmpl = `
 				{{template "ComplexTypeInline" .}}
 			{{end}}
 		{{else}}
-			{{$goTypeName := toGoType .Type .Nillable}}
+			{{$goTypeName := toGoType .Type (eq .MinOccurs "0")}}
 
 			{{if isAbstract .Type}}
 				{{$goTypeName = print $goTypeName "Wrapper"}}
