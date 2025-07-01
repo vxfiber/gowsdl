@@ -147,7 +147,9 @@ var typesTmpl = `
 			}
 		{{end}}
 
-		{{if eq .Abstract true}}
+		{{/* Abstract types will be wrapped in a wrapper type for XML marshaling */}}
+		{{/* This is however only done if the abstract type is used anywhere. If only the extended types are used there is no need for abstract type to be generated. */}}
+		{{if and (eq .Abstract true) (ne (findNameByType .Name) .Name)}}
 			{{$exts := getExtentions .Name}}
 
 			// {{$typeName}}Wrapper is a wrapper for the abstract type {{$typeName}}.
@@ -159,13 +161,13 @@ var typesTmpl = `
 
 			// MarshalXML implements the xml.Marshaler interface for {{$typeName}}Wrapper.
 			func (w {{$typeName}}Wrapper) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-				start.Name.Local = "{{$typeName}}"
+				start.Name.Local = "{{findNameByType $typeName}}"
 				if err := e.EncodeToken(start); err != nil {
 					return err
 				}
 				{{range $exts}}
 				if w.{{toGoType . false | removePointerFromType}} != nil {
-					if err := e.EncodeElement(w.{{toGoType . false | removePointerFromType}}, xml.StartElement{Name: xml.Name{Local: "{{.}}"}}); err != nil {
+					if err := e.EncodeElement(w.{{toGoType . false | removePointerFromType}}, xml.StartElement{Name: xml.Name{Local: "{{findNameByType .}}"}}); err != nil {
 						return err
 					}
 				}
@@ -183,7 +185,7 @@ var typesTmpl = `
 					if el, ok := tok.(xml.StartElement); ok {
 						switch el.Name.Local {
 						{{range $exts}}
-						case "{{.}}":
+						case "{{findNameByType .}}":
 							var item {{toGoType . false | replaceReservedWords | makePublic}}
 							if err := d.DecodeElement(&item, &el); err != nil {
 								return err
