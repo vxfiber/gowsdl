@@ -302,6 +302,8 @@ func (g *GoWSDL) genTypes() ([]byte, error) {
 		"removePointerFromType":    removePointerFromType,
 		"setNS":                    g.setNS,
 		"getNS":                    g.getNS,
+		"isAbstract":               g.isAbstract,
+		"getExtentions":            g.getExtentions,
 	}
 
 	data := new(bytes.Buffer)
@@ -612,6 +614,33 @@ func (g *GoWSDL) findType(message string) string {
 // Given a type, check if there's an Element with that type, and return its name.
 func (g *GoWSDL) findNameByType(name string) string {
 	return newTraverser(nil, g.wsdl.Types.Schemas).findNameByType(name)
+}
+
+func (g *GoWSDL) isAbstract(name string) bool {
+	sn := stripns(name)
+	for _, schema := range g.wsdl.Types.Schemas {
+		for _, ct := range schema.ComplexTypes {
+			if sn == ct.Name {
+				return ct.Abstract
+			}
+		}
+	}
+
+	return false
+}
+
+func (g *GoWSDL) getExtentions(baseType string) []string {
+
+	var exts []string
+	for _, schema := range g.wsdl.Types.Schemas {
+		for _, ct := range schema.ComplexTypes {
+			if baseType == stripns(ct.ComplexContent.Extension.Base) {
+				exts = append(exts, ct.Name)
+			}
+		}
+	}
+
+	return exts
 }
 
 // TODO(c4milo): Add support for namespaces instead of striping them out

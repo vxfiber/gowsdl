@@ -95,8 +95,14 @@ var typesTmpl = `
 				{{template "ComplexTypeInline" .}}
 			{{end}}
 		{{else}}
+			{{$goTypeName := toGoType .Type .Nillable}}
+
+			{{if isAbstract .Type}}
+				{{$goTypeName = print $goTypeName "Wrapper"}}
+			{{end}}
+
 			{{if .Doc}}{{.Doc | comment}} {{end}}
-			{{replaceAttrReservedWords .Name | makeFieldPublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{toGoType .Type .Nillable }} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + ` {{end}}
+			{{replaceAttrReservedWords .Name | makeFieldPublic}} {{if eq .MaxOccurs "unbounded"}}[]{{end}}{{$goTypeName}} ` + "`" + `xml:"{{.Name}},omitempty" json:"{{.Name}},omitempty"` + "`" + ` {{end}}
 		{{end}}
 	{{end}}
 {{end}}
@@ -218,6 +224,60 @@ var typesTmpl = `
 					{{template "Elements" .All}}
 					{{template "Attributes" .Attributes}}
 				{{end}}
+			}
+		{{end}}
+
+		{{if eq .Abstract true}}
+			{{$exts := getExtentions .Name}}
+
+			// {{$typeName}}Wrapper is a wrapper for the abstract type {{$typeName}}.
+			type {{$typeName}}Wrapper struct {
+				{{ range $exts }}
+					{{toGoType . false | removePointerFromType}} *{{toGoType . false | replaceReservedWords | makePublic}}
+				{{end}}
+			}
+
+			// MarshalXML implements the xml.Marshaler interface for {{$typeName}}Wrapper.
+			func (w {{$typeName}}Wrapper) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+				start.Name.Local = "{{$typeName}}"
+				if err := e.EncodeToken(start); err != nil {
+					return err
+				}
+				{{range $exts}}
+				if w.{{toGoType . false | removePointerFromType}} != nil {
+					if err := e.EncodeElement(w.{{toGoType . false | removePointerFromType}}, xml.StartElement{Name: xml.Name{Local: "{{.}}"}}); err != nil {
+						return err
+					}
+				}
+				{{end}}
+				return e.EncodeToken(xml.EndElement{Name: start.Name})
+			}
+
+			// UnmarshalXML implements the xml.Unmarshaler interface for {{$typeName}}Wrapper.
+			func (w *{{$typeName}}Wrapper) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+				for {
+					tok, err := d.Token()
+					if err != nil {
+						return err
+					}
+					if el, ok := tok.(xml.StartElement); ok {
+						switch el.Name.Local {
+						{{range $exts}}
+						case "{{.}}":
+							var item {{toGoType . false | replaceReservedWords | makePublic}}
+							if err := d.DecodeElement(&item, &el); err != nil {
+								return err
+							}
+							w.{{toGoType . false | removePointerFromType}} = &item
+						{{end}}
+						default:
+							return fmt.Errorf("unexpected element %s in {{$typeName}}Wrapper", el.Name.Local)
+						}
+					} else if _, ok := tok.(xml.EndElement); ok {
+						break
+					}
+				}
+				return nil
 			}
 		{{end}}
 	{{end}}
