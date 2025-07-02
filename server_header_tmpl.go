@@ -8,7 +8,6 @@ package {{.}}
 import (
 	"fmt"
 	"errors"
-	"reflect"
 	"strings"
 	"encoding/xml"
 	"net/http"
