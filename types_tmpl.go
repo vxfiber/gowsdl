@@ -165,13 +165,15 @@ var typesTmpl = `
 				if err := e.EncodeToken(start); err != nil {
 					return err
 				}
+
+				switch {
 				{{range $exts}}
-				if w.{{toGoType . false | removePointerFromType}} != nil {
+					case w.{{toGoType . false | removePointerFromType}} != nil :
 					if err := e.EncodeElement(w.{{toGoType . false | removePointerFromType}}, xml.StartElement{Name: xml.Name{Local: "{{findNameByType .}}"}}); err != nil {
 						return err
 					}
-				}
 				{{end}}
+				}
 				return e.EncodeToken(xml.EndElement{Name: start.Name})
 			}
 
