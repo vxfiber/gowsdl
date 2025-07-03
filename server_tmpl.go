@@ -89,6 +89,7 @@ func NewSOAPEndpoint(svc SOAPService, useWSSecurity bool) http.HandlerFunc {
 				resp.Body.Fault.Detail = fmt.Sprintf("%v", r)
 				resp.Body.Fault.String = fmt.Sprintf("%v", r)
 			}
+			// TODO: WSSecutity on the response
 			xml.NewEncoder(w).Encode(resp)
 		}()
 
