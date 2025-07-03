@@ -97,11 +97,23 @@ func NewSOAPEndpoint(svc SOAPService) http.HandlerFunc {
 			panic("Could not find an appropriate Transport Binding to invoke.")
 		}
 
-		if err := xml.NewDecoder(r.Body).Decode(&request); err != nil {
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
 			panic(err)
 		}
 
-		var err error
+		doc := etree.NewDocument()
+		if err := doc.ReadFromBytes(rawBody); err != nil {
+			panic(err)
+		}
+
+		if err := validate(doc); err != nil {
+			panic(err)
+		}
+
+		if err := xml.Unmarshal(rawBody, &request); err != nil {
+			panic(err)
+		}
 		
 		{{range .}}
 			{{range .Operations}}
@@ -120,5 +132,18 @@ func NewSOAPEndpoint(svc SOAPService) http.HandlerFunc {
 
 		panic(ErrWSDLUndefined)
 	}
+}
+
+func validate(doc *etree.Document) error {
+	ctx := dsig.NewDefaultValidationContext(&soap.LocalFileStore{})
+
+	// It is important to only use the returned validated element. // Leos note: NO
+	// See: https://www.w3.org/TR/xmldsig-bestpractices/#check-what-is-signed
+	_, err := ctx.ValidateBody(doc.Root())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 `

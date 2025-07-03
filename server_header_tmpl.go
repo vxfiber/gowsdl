@@ -6,11 +6,16 @@ var serverHeaderTmpl = `
 package {{.}}
 
 import (
+	"io"
 	"fmt"
 	"errors"
 	"strings"
 	"encoding/xml"
 	"net/http"
+
+	"github.com/beevik/etree"
+	dsig "github.com/russellhaering/goxmldsig"
+	"github.com/vxfiber/gowsdl/soap"
 
 	{{/*range .Imports*/}}
 		{{/*.*/}}
