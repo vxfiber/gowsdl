@@ -70,7 +70,7 @@ type SOAPService interface {
 	{{end}}
 }
 
-func NewSOAPEndpoint(svc SOAPService) http.HandlerFunc {
+func NewSOAPEndpoint(svc SOAPService, useWSSecurity bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request := SOAPEnvelopeRequest{}
 		w.Header().Add("Content-Type", "text/xml; charset=utf-8")
@@ -102,13 +102,15 @@ func NewSOAPEndpoint(svc SOAPService) http.HandlerFunc {
 			panic(err)
 		}
 
-		doc := etree.NewDocument()
-		if err := doc.ReadFromBytes(rawBody); err != nil {
-			panic(err)
-		}
-
-		if err := validate(doc); err != nil {
-			panic(err)
+		if useWSSecurity {
+			doc := etree.NewDocument()
+			if err := doc.ReadFromBytes(rawBody); err != nil {
+				panic(err)
+			}
+			
+			if err := validate(doc); err != nil {
+				panic(err)
+			}
 		}
 
 		if err := xml.Unmarshal(rawBody, &request); err != nil {

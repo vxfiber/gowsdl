@@ -261,6 +261,7 @@ type options struct {
 	httpHeaders      map[string]string
 	mtom             bool
 	mma              bool
+	useWSSecurity    bool
 }
 
 var defaultOptions = options{
@@ -339,6 +340,12 @@ func WithMTOM() Option {
 func WithMIMEMultipartAttachments() Option {
 	return func(o *options) {
 		o.mma = true
+	}
+}
+
+func WithWSSecurity() Option {
+	return func(o *options) {
+		o.useWSSecurity = true
 	}
 }
 
@@ -486,25 +493,6 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 		},
 	}
 
-	rawEnvelopeXML, _ := xml.MarshalIndent(envelope, "", "  ")
-	// rawEnvelopeXML, _ := xml.Marshal(envelope)
-
-	envelopeDoc := etree.NewDocument()
-	envelopeDoc.ReadFromBytes(rawEnvelopeXML)
-
-	sctx := dsig.NewDefaultSigningContext(&LocalFileStore{})
-	bodyEl := envelopeDoc.FindElement("//soap:Body")
-	sig, err := sctx.ConstructSignature(bodyEl, false)
-	if err != nil {
-		return err
-	}
-
-	headerEl := envelopeDoc.FindElement("//soap:Header")
-	if headerEl == nil {
-		panic("SOAP Header element not found in envelope")
-	}
-	headerEl.AddChild(sig)
-
 	// buffer := new(bytes.Buffer)
 	// var encoder SOAPEncoder
 	// if s.opts.mtom && s.opts.mma {
@@ -525,14 +513,38 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 	// 	return err
 	// }
 
-	ds, err := envelopeDoc.WriteToString()
-	if err != nil {
-		return err
+	rawEnvelopeXML, _ := xml.MarshalIndent(envelope, "", "  ")
+
+	var bodyReader io.Reader
+
+	if s.opts.useWSSecurity {
+		envelopeDoc := etree.NewDocument()
+		envelopeDoc.ReadFromBytes(rawEnvelopeXML)
+
+		sctx := dsig.NewDefaultSigningContext(&LocalFileStore{})
+		bodyEl := envelopeDoc.FindElement("//soap:Body")
+		sig, err := sctx.ConstructSignature(bodyEl, false)
+		if err != nil {
+			return err
+		}
+
+		headerEl := envelopeDoc.FindElement("//soap:Header")
+		if headerEl == nil {
+			panic("SOAP Header element not found in envelope")
+		}
+		headerEl.AddChild(sig)
+
+		ds, err := envelopeDoc.WriteToString()
+		if err != nil {
+			return err
+		}
+
+		bodyReader = strings.NewReader(ds)
+	} else {
+		bodyReader = bytes.NewBuffer(rawEnvelopeXML)
 	}
 
-	buf := strings.NewReader(ds)
-
-	req, err := http.NewRequest("POST", s.url, buf)
+	req, err := http.NewRequest("POST", s.url, bodyReader)
 	if err != nil {
 		return err
 	}
