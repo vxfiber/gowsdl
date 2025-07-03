@@ -3,14 +3,21 @@ package soap
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"encoding/xml"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 	"time"
+
+	"github.com/beevik/etree"
+	dsig "github.com/russellhaering/goxmldsig"
 )
 
 type SOAPEncoder interface {
@@ -423,41 +430,109 @@ func (s *Client) CallWithFaultDetail(soapAction string, request, response interf
 	return s.call(context.Background(), soapAction, request, response, faultDetail, nil)
 }
 
+// For local testing purposes, we use a local file store
+type LocalFileStore struct{}
+
+func (s *LocalFileStore) GetKeyPair() (*rsa.PrivateKey, []byte, error) {
+	certPEM, err := os.ReadFile("tmp/cert/cert.pem")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read certificate: %w", err)
+	}
+
+	keyPEM, err := os.ReadFile("tmp/cert/key.pem")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read private key: %w", err)
+	}
+
+	blockCert, _ := pem.Decode(certPEM)
+	cert, err := x509.ParseCertificate(blockCert.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	blockKey, _ := pem.Decode(keyPEM)
+	privateKey, err := x509.ParsePKCS8PrivateKey(blockKey.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	return privateKey.(*rsa.PrivateKey), cert.Raw, nil
+}
+
+func (s *LocalFileStore) Certificates() (roots []*x509.Certificate, err error) {
+	certPEM, err := os.ReadFile("tmp/cert/cert.pem")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read certificate: %w", err)
+	}
+
+	blockCert, _ := pem.Decode(certPEM)
+	cert, err := x509.ParseCertificate(blockCert.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+	return []*x509.Certificate{cert}, nil
+}
+
 func (s *Client) call(ctx context.Context, soapAction string, request, response interface{}, faultDetail FaultError,
 	retAttachments *[]MIMEMultipartAttachment) error {
-	// SOAP envelope capable of namespace prefixes
+
 	envelope := SOAPEnvelope{
 		XmlNS: XmlNsSoapEnv,
-	}
-
-	if s.headers != nil && len(s.headers) > 0 {
-		envelope.Header = &SOAPHeader{
+		Header: &SOAPHeader{
 			Headers: s.headers,
-		}
+		},
+		Body: SOAPBody{
+			Content: request,
+		},
 	}
 
-	envelope.Body.Content = request
-	buffer := new(bytes.Buffer)
-	var encoder SOAPEncoder
-	if s.opts.mtom && s.opts.mma {
-		return fmt.Errorf("cannot use MTOM (XOP) and MMA (MIME Multipart Attachments) option at the same time")
-	} else if s.opts.mtom {
-		encoder = newMtomEncoder(buffer)
-	} else if s.opts.mma {
-		encoder = newMmaEncoder(buffer, s.attachments)
-	} else {
-		encoder = xml.NewEncoder(buffer)
-	}
+	rawEnvelopeXML, _ := xml.MarshalIndent(envelope, "", "  ")
+	// rawEnvelopeXML, _ := xml.Marshal(envelope)
 
-	if err := encoder.Encode(envelope); err != nil {
+	envelopeDoc := etree.NewDocument()
+	envelopeDoc.ReadFromBytes(rawEnvelopeXML)
+
+	sctx := dsig.NewDefaultSigningContext(&LocalFileStore{})
+	bodyEl := envelopeDoc.FindElement("//soap:Body")
+	sig, err := sctx.ConstructSignature(bodyEl, false)
+	if err != nil {
 		return err
 	}
 
-	if err := encoder.Flush(); err != nil {
+	headerEl := envelopeDoc.FindElement("//soap:Header")
+	if headerEl == nil {
+		panic("SOAP Header element not found in envelope")
+	}
+	headerEl.AddChild(sig)
+
+	// buffer := new(bytes.Buffer)
+	// var encoder SOAPEncoder
+	// if s.opts.mtom && s.opts.mma {
+	// 	return fmt.Errorf("cannot use MTOM (XOP) and MMA (MIME Multipart Attachments) option at the same time")
+	// } else if s.opts.mtom {
+	// 	encoder = newMtomEncoder(buffer)
+	// } else if s.opts.mma {
+	// encoder = newMmaEncoder(buffer, s.attachments)
+	// } else {
+	// 	encoder = xml.NewEncoder(buffer)
+	// }
+
+	// if err := encoder.Encode(envelope); err != nil {
+	// 	return err
+	// }
+
+	// if err := encoder.Flush(); err != nil {
+	// 	return err
+	// }
+
+	ds, err := envelopeDoc.WriteToString()
+	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", s.url, buffer)
+	buf := strings.NewReader(ds)
+
+	req, err := http.NewRequest("POST", s.url, buf)
 	if err != nil {
 		return err
 	}
@@ -467,15 +542,16 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 
 	req = req.WithContext(ctx)
 
-	if s.opts.mtom {
-		req.Header.Add("Content-Type", fmt.Sprintf(mtomContentType, encoder.(*mtomEncoder).Boundary()))
-	} else if s.opts.mma {
-		req.Header.Add("Content-Type", fmt.Sprintf(mmaContentType, encoder.(*mmaEncoder).Boundary()))
-	} else {
-		req.Header.Add("Content-Type", "text/xml; charset=\"utf-8\"")
-	}
+	// if s.opts.mtom {
+	// 	req.Header.Add("Content-Type", fmt.Sprintf(mtomContentType, encoder.(*mtomEncoder).Boundary()))
+	// } else if s.opts.mma {
+	// 	req.Header.Add("Content-Type", fmt.Sprintf(mmaContentType, encoder.(*mmaEncoder).Boundary()))
+	// } else {
+	// req.Header.Add("Content-Type", "text/xml; charset=\"utf-8\"")
+	// }
+
+	req.Header.Add("Content-Type", "text/xml; charset=\"utf-8\"")
 	req.Header.Add("SOAPAction", soapAction)
-	req.Header.Set("User-Agent", "gowsdl/0.1")
 	if s.opts.httpHeaders != nil {
 		for k, v := range s.opts.httpHeaders {
 			req.Header.Set(k, v)
@@ -503,7 +579,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 	defer res.Body.Close()
 
 	if res.StatusCode >= 400 && res.StatusCode != 500 {
-		body, _ := ioutil.ReadAll(res.Body)
+		body, _ := io.ReadAll(res.Body)
 		return &HTTPError{
 			StatusCode:   res.StatusCode,
 			ResponseBody: body,
@@ -526,7 +602,7 @@ func (s *Client) call(ctx context.Context, soapAction string, request, response 
 	}
 
 	var mmaBoundary string
-	if s.opts.mma{
+	if s.opts.mma {
 		mmaBoundary, err = getMmaHeader(res.Header.Get("Content-Type"))
 		if err != nil {
 			return err
