@@ -308,6 +308,11 @@ func (g *GoWSDL) genTypes() ([]byte, error) {
 		"getNS":                    g.getNS,
 		"isAbstract":               g.isAbstract,
 		"getExtentions":            g.getExtentions,
+		"resolveBaseType":          g.resolveBaseType,
+		// "println": func(a ...any) string {
+		// 	fmt.Println(a...)
+		// 	return ""
+		// },
 	}
 
 	data := new(bytes.Buffer)
@@ -652,7 +657,6 @@ func (g *GoWSDL) isAbstract(name string) bool {
 }
 
 func (g *GoWSDL) getExtentions(baseType string) []string {
-
 	var exts []string
 	for _, schema := range g.wsdl.Types.Schemas {
 		for _, ct := range schema.ComplexTypes {
@@ -663,6 +667,26 @@ func (g *GoWSDL) getExtentions(baseType string) []string {
 	}
 
 	return exts
+}
+
+// resolveBaseType finds the base type that a simple type represents
+func (g *GoWSDL) resolveBaseType(t string) string {
+	t = stripns(t)
+
+	for _, schema := range g.wsdl.Types.Schemas {
+		for _, ct := range schema.SimpleType {
+			if t == ct.Name {
+				if len(ct.Restriction.Enumeration) > 0 {
+					// If the type is an enumeration, we want it to generate as its own type
+					return ""
+				}
+
+				return stripns(ct.Restriction.Base)
+			}
+		}
+	}
+
+	return ""
 }
 
 // TODO(c4milo): Add support for namespaces instead of striping them out

@@ -8,6 +8,7 @@ var typesTmpl = `
 {{define "SimpleType"}}
 	{{$typeName := toGoType .Name false | removePointerFromType}}
 	{{if .Doc}} {{.Doc | comment}} {{end}}
+	{{/*
 	{{if ne .List.ItemType ""}}
 		type {{$typeName}} []{{toGoType .List.ItemType false | removePointerFromType}}
 	{{else if ne .Union.MemberTypes ""}}
@@ -19,8 +20,11 @@ var typesTmpl = `
     {{else}}
 		type {{$typeName}} interface{}
 	{{end}}
+	*/}}
 
 	{{if .Restriction.Enumeration}}
+	type {{$typeName}} {{toGoType .Restriction.Base false | removePointerFromType}}
+	
 	const (
 		{{with .Restriction}}
 			{{range .Enumeration}}
@@ -95,7 +99,12 @@ var typesTmpl = `
 				{{template "ComplexTypeInline" .}}
 			{{end}}
 		{{else}}
-			{{$goTypeName := toGoType .Type (eq .MinOccurs "0")}}
+			{{$goTypeName := resolveBaseType .Type}}
+			{{if eq $goTypeName ""}}
+				{{$goTypeName = .Type}}
+			{{end}}
+
+			{{$goTypeName = toGoType $goTypeName (eq .MinOccurs "0")}}
 
 			{{if isAbstract .Type}}
 				{{$goTypeName = print $goTypeName "Wrapper"}}
