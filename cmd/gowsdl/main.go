@@ -56,7 +56,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	gen "github.com/hooklift/gowsdl"
+	gen "github.com/vxfiber/gowsdl"
 )
 
 // Version is initialized in compilation time by go build.
